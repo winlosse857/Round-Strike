@@ -21,6 +21,11 @@ public static class ProjectSetup
     {
         if (EditorApplication.isCompiling || EditorApplication.isUpdating) return;
 
+        PlayerSettings.productName = "STRIKE ZONE: MOBILE";
+        PlayerSettings.companyName = "STRIKE ZONE";
+        PlayerSettings.defaultInterfaceOrientation = UIOrientation.LandscapeLeft;
+        PlayerSettings.SetApplicationIdentifier(BuildTargetGroup.Android, "com.strikezone.mobile");
+
         if (!Directory.Exists("Assets/Scenes"))
             Directory.CreateDirectory("Assets/Scenes");
 
