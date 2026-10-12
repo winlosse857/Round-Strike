@@ -126,6 +126,8 @@ public class GameBootstrap : MonoBehaviour
 
     void BuildUI()
     {
+        if (FindObjectOfType<EventSystem>() == null)
+            new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
         var canvasObj = new GameObject("Mobile HUD");
         var canvas = canvasObj.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
