@@ -27,12 +27,18 @@ public class GameBootstrap : MonoBehaviour
     private GameObject menuRoot;
     private readonly List<BotAgent> bots = new List<BotAgent>();
     private readonly List<GameObject> touchControls = new List<GameObject>();
+    private WeaponAudio audioSystem;
+    private int selectedMode = 0; // 0 Training, 1 Kill Count, 2 Survival
+    private float modeTimer = 90f;
+    private float stepTimer;
+    private bool roundEnded;
 
     void Awake()
     {
         Instance = this;
         Application.targetFrameRate = 60;
         QualitySettings.vSyncCount = 0;
+        audioSystem = gameObject.AddComponent<WeaponAudio>();
         BuildArena();
         BuildPlayer();
         BuildBots();
@@ -65,6 +71,11 @@ public class GameBootstrap : MonoBehaviour
             MakeBlock(new Vector3(10, 1.4f, i * 7), new Vector3(1, 2.8f, 3), wallMat);
             MakeBlock(new Vector3(-10, 1.4f, i * 7), new Vector3(1, 2.8f, 3), wallMat);
         }
+        var coverMat = Mat(new Color(.25f,.29f,.43f));
+        MakeBlock(new Vector3(-6.5f, .75f, 0), new Vector3(1.2f, 1.5f, 4.2f), coverMat);
+        MakeBlock(new Vector3(6.5f, .75f, 0), new Vector3(1.2f, 1.5f, 4.2f), coverMat);
+        MakeBlock(new Vector3(0, .55f, 6.5f), new Vector3(4.5f, 1.1f, 1.1f), coverMat);
+        MakeBlock(new Vector3(0, .55f, -6.5f), new Vector3(4.5f, 1.1f, 1.1f), coverMat);
         var crateMat = Mat(new Color(.34f,.38f,.48f));
         for (int i = 0; i < 9; i++)
         {
@@ -164,8 +175,17 @@ public class GameBootstrap : MonoBehaviour
         var subtitle = MakeText(menuRoot.transform, "Subtitle", "MOBILE  •  OFFLINE TRAINING", 18, TextAnchor.MiddleCenter, font);
         subtitle.rectTransform.anchorMin = new Vector2(.1f,.46f); subtitle.rectTransform.anchorMax = new Vector2(.9f,.57f);
         subtitle.rectTransform.offsetMin = subtitle.rectTransform.offsetMax = Vector2.zero;
-        var play = MakeButton(menuRoot.transform, "PLAY  /  TRAINING", new Vector2(.5f,.35f), font, () => SetPlaying(true));
-        play.GetComponent<RectTransform>().sizeDelta = new Vector2(300,70);
+        var modeLabel = MakeText(menuRoot.transform, "ModeLabel", "SELECT MODE", 16, TextAnchor.MiddleCenter, font);
+        modeLabel.rectTransform.anchorMin = new Vector2(.1f,.35f); modeLabel.rectTransform.anchorMax = new Vector2(.9f,.43f);
+        modeLabel.rectTransform.offsetMin = modeLabel.rectTransform.offsetMax = Vector2.zero;
+        var training = MakeButton(menuRoot.transform, "TRAINING", new Vector2(.28f,.29f), font, () => SelectMode(0));
+        training.GetComponent<RectTransform>().sizeDelta = new Vector2(150,48);
+        var killCount = MakeButton(menuRoot.transform, "10 KILLS", new Vector2(.5f,.29f), font, () => SelectMode(1));
+        killCount.GetComponent<RectTransform>().sizeDelta = new Vector2(150,48);
+        var survival = MakeButton(menuRoot.transform, "SURVIVAL", new Vector2(.72f,.29f), font, () => SelectMode(2));
+        survival.GetComponent<RectTransform>().sizeDelta = new Vector2(150,48);
+        var play = MakeButton(menuRoot.transform, "PLAY", new Vector2(.5f,.17f), font, () => SetPlaying(true));
+        play.GetComponent<RectTransform>().sizeDelta = new Vector2(260,58);
     }
 
     Text MakeText(Transform parent, string n, string value, int size, TextAnchor anchor, Font font)
@@ -217,8 +237,18 @@ public class GameBootstrap : MonoBehaviour
         else if (inputName == "right") mobileRight = pressed;
     }
 
+    void SelectMode(int mode)
+    {
+        selectedMode = Mathf.Clamp(mode, 0, 2);
+        kills = 0;
+        playerHealth = 100;
+        modeTimer = 90f;
+        roundEnded = false;
+    }
+
     void SetPlaying(bool value)
     {
+        if (value) SelectMode(selectedMode);
         started = value;
         if (menuRoot) menuRoot.SetActive(!value);
         Cursor.lockState = value && !Application.isMobilePlatform ? CursorLockMode.Locked : CursorLockMode.None;
@@ -229,6 +259,16 @@ public class GameBootstrap : MonoBehaviour
     {
         if (!started) return;
         fireCooldown -= Time.deltaTime;
+        if (selectedMode == 2 && !roundEnded)
+        {
+            modeTimer -= Time.deltaTime;
+            if (modeTimer <= 0f) EndRound("TIME UP");
+        }
+        if (reloading)
+        {
+            reloadTimer -= Time.deltaTime;
+            if (reloadTimer <= 0f) FinishReload();
+        }
         float h = Input.GetAxisRaw("Horizontal");
         float v = Input.GetAxisRaw("Vertical");
         if (Application.isMobilePlatform)
@@ -273,7 +313,13 @@ public class GameBootstrap : MonoBehaviour
         cam.transform.localRotation = Quaternion.Euler(pitch, 0, 0);
         Vector3 dir = (player.right * h + player.forward * v).normalized;
         controller.Move((dir * 5.2f + Vector3.down * 2f) * Time.deltaTime);
-        if (hudText) hudText.text = "STRIKE ZONE     HP " + playerHealth + "     " + ammo + " / " + reserveAmmo + "     KILLS " + kills;
+        if (dir.sqrMagnitude > .08f && controller.isGrounded)
+        {
+            stepTimer -= Time.deltaTime;
+            if (stepTimer <= 0f) { if (audioSystem) audioSystem.PlayStep(); stepTimer = .42f; }
+        }
+        string modeName = selectedMode == 0 ? "TRAINING" : (selectedMode == 1 ? "10 KILLS" : "SURVIVAL " + Mathf.CeilToInt(modeTimer) + "s");
+        if (hudText) hudText.text = "STRIKE ZONE   " + modeName + "   HP " + playerHealth + "   " + ammo + " / " + reserveAmmo + "   KILLS " + kills;
     }
 
     void MoveForward(float amount)
@@ -281,10 +327,14 @@ public class GameBootstrap : MonoBehaviour
         if (started && controller) controller.Move(player.forward * amount);
     }
 
+    private bool reloading;
+    private float reloadTimer;
+
     void Shoot()
     {
-        if (!started || fireCooldown > 0 || ammo <= 0) return;
+        if (!started || roundEnded || reloading || fireCooldown > 0 || ammo <= 0) return;
         fireCooldown = .15f; ammo--;
+        if (audioSystem) audioSystem.PlayShot();
         if (Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit hit, 90f))
         {
             var bot = hit.collider.GetComponent<BotAgent>();
@@ -294,15 +344,50 @@ public class GameBootstrap : MonoBehaviour
 
     void Reload()
     {
-        int needed = 30 - ammo;
-        int load = Mathf.Min(needed, reserveAmmo);
-        ammo += load; reserveAmmo -= load;
+        if (!started || reloading || ammo >= 30 || reserveAmmo <= 0) return;
+        reloading = true;
+        reloadTimer = 1.15f;
+        if (audioSystem) audioSystem.PlayReload();
+    }
+
+    void FinishReload()
+    {
+        reloading = false;
+        int load = Mathf.Min(30 - ammo, reserveAmmo);
+        ammo += load;
+        reserveAmmo -= load;
+    }
+
+    public void DamagePlayer(int amount)
+    {
+        if (!started || roundEnded) return;
+        playerHealth = Mathf.Max(0, playerHealth - amount);
+        if (playerHealth <= 0)
+        {
+            if (selectedMode == 0) playerHealth = 100;
+            else EndRound("YOU WERE ELIMINATED");
+        }
+    }
+
+    void EndRound(string message)
+    {
+        if (roundEnded) return;
+        roundEnded = true;
+        started = false;
+        if (menuRoot) menuRoot.SetActive(true);
+        var title = menuRoot ? menuRoot.transform.Find("Title") : null;
+        if (title)
+        {
+            var label = title.GetComponent<Text>();
+            if (label) label.text = message;
+        }
     }
 
     public void BotKilled(BotAgent bot)
     {
         kills++;
         bot.Respawn();
+        if (selectedMode == 1 && kills >= 10) EndRound("VICTORY  /  10 KILLS");
     }
 
     public Transform PlayerTransform { get { return player; } }
@@ -312,27 +397,82 @@ public class BotAgent : MonoBehaviour
 {
     private int health = 100;
     private Vector3 home;
-    private float timer;
-    void Start() { home = transform.position; }
+    private float attackTimer;
+    private float thinkTimer;
+    private Vector3 steering;
+    private Renderer bodyRenderer;
+    private Color baseColor = new Color(.75f,.20f,.29f);
+
+    void Start()
+    {
+        home = transform.position;
+        bodyRenderer = GetComponent<Renderer>();
+    }
+
     void Update()
     {
         if (GameBootstrap.Instance == null || GameBootstrap.Instance.PlayerTransform == null) return;
-        var target = GameBootstrap.Instance.PlayerTransform.position;
-        Vector3 flat = target - transform.position; flat.y = 0;
-        if (flat.magnitude < 13f && flat.magnitude > 2.4f)
-            transform.position += flat.normalized * (1.1f * Time.deltaTime);
-        if (flat.sqrMagnitude > .1f) transform.rotation = Quaternion.LookRotation(flat);
-        timer += Time.deltaTime;
+        var game = GameBootstrap.Instance;
+        var player = game.PlayerTransform;
+        Vector3 toPlayer = player.position - transform.position;
+        toPlayer.y = 0f;
+        float distance = toPlayer.magnitude;
+        if (distance > 24f) return;
+
+        Vector3 eye = transform.position + Vector3.up * .65f;
+        Vector3 target = player.position + Vector3.up * 1.15f;
+        Vector3 aim = target - eye;
+        bool visible = !Physics.Raycast(eye, aim.normalized, out RaycastHit sight, Mathf.Max(0.1f, aim.magnitude), ~0, QueryTriggerInteraction.Ignore)
+            || sight.collider.GetComponent<CharacterController>() != null
+            || sight.collider.transform == player;
+
+        Vector3 direction = distance > .01f ? toPlayer.normalized : transform.forward;
+        if (distance > 3.2f)
+        {
+            Vector3 moveDir = direction;
+            Vector3 origin = transform.position + Vector3.up * .55f;
+            if (Physics.SphereCast(origin, .35f, direction, out RaycastHit obstacle, 1.15f, ~0, QueryTriggerInteraction.Ignore))
+            {
+                Vector3 side = Vector3.Cross(Vector3.up, direction);
+                bool rightClear = !Physics.Raycast(origin, (direction + side).normalized, 1.2f);
+                bool leftClear = !Physics.Raycast(origin, (direction - side).normalized, 1.2f);
+                if (rightClear || leftClear)
+                    moveDir = (direction + side * (rightClear ? 1f : -1f)).normalized;
+                else
+                    moveDir = -direction;
+            }
+            transform.position += moveDir * (visible ? 1.45f : 1.9f) * Time.deltaTime;
+        }
+
+        if (distance > .1f) transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(direction), 7f * Time.deltaTime);
+
+        attackTimer -= Time.deltaTime;
+        if (visible && distance < 13f && attackTimer <= 0f)
+        {
+            attackTimer = 1.25f;
+            game.DamagePlayer(8);
+        }
+
+        thinkTimer -= Time.deltaTime;
+        if (thinkTimer <= 0f)
+        {
+            thinkTimer = .3f;
+            if (bodyRenderer) bodyRenderer.material.color = visible ? baseColor : new Color(.42f,.24f,.52f);
+        }
     }
+
     public void TakeDamage(int damage)
     {
         health -= damage;
         if (health <= 0 && GameBootstrap.Instance != null) GameBootstrap.Instance.BotKilled(this);
     }
+
     public void Respawn()
     {
         health = 100;
         transform.position = home;
+        if (bodyRenderer) bodyRenderer.material.color = baseColor;
+        attackTimer = .5f;
     }
 }
 
