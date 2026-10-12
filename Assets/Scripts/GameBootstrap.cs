@@ -250,6 +250,11 @@ public class GameBootstrap : MonoBehaviour
     {
         if (value) SelectMode(selectedMode);
         started = value;
+        if (value && menuRoot)
+        {
+            var title = menuRoot.transform.Find("Title");
+            if (title && title.GetComponent<Text>()) title.GetComponent<Text>().text = "STRIKE ZONE";
+        }
         if (menuRoot) menuRoot.SetActive(!value);
         Cursor.lockState = value && !Application.isMobilePlatform ? CursorLockMode.Locked : CursorLockMode.None;
         Cursor.visible = !value;
@@ -338,7 +343,7 @@ public class GameBootstrap : MonoBehaviour
         if (Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit hit, 90f))
         {
             var bot = hit.collider.GetComponent<BotAgent>();
-            if (bot) bot.TakeDamage(34);
+            if (bot) { bot.TakeDamage(34); if (audioSystem) audioSystem.PlayHit(); }
         }
     }
 
