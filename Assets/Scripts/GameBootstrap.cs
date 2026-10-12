@@ -20,6 +20,9 @@ public class GameBootstrap : MonoBehaviour
     private Vector2 moveTouch;
     private Vector2 lookTouch;
     private bool fireHeld;
+    private bool mobileForward, mobileBack, mobileLeft, mobileRight;
+    private int lookFingerId = -1;
+    private Vector2 lastLookPosition;
     private Text hudText;
     private GameObject menuRoot;
     private readonly List<BotAgent> bots = new List<BotAgent>();
@@ -143,9 +146,10 @@ public class GameBootstrap : MonoBehaviour
 
         MakeTouchButton(canvas.transform, "FIRE", new Vector2(1,0), new Vector2(-105,125), () => Shoot());
         MakeTouchButton(canvas.transform, "RELOAD", new Vector2(1,0), new Vector2(-105,55), Reload);
-        MakeTouchButton(canvas.transform, "LEFT", new Vector2(0,0), new Vector2(75,90), () => yaw -= 8);
-        MakeTouchButton(canvas.transform, "RIGHT", new Vector2(0,0), new Vector2(165,90), () => yaw += 8);
-        MakeTouchButton(canvas.transform, "UP", new Vector2(0,0), new Vector2(120,150), () => MoveForward(.8f));
+        MakeHoldButton(canvas.transform, "LEFT", new Vector2(0,0), new Vector2(70,95), "left");
+        MakeHoldButton(canvas.transform, "RIGHT", new Vector2(0,0), new Vector2(170,95), "right");
+        MakeHoldButton(canvas.transform, "FORWARD", new Vector2(0,0), new Vector2(120,155), "forward");
+        MakeHoldButton(canvas.transform, "BACK", new Vector2(0,0), new Vector2(120,35), "back");
 
         menuRoot = new GameObject("Main Menu", typeof(RectTransform), typeof(Image));
         menuRoot.transform.SetParent(canvas.transform, false);
@@ -192,6 +196,25 @@ public class GameBootstrap : MonoBehaviour
         rt.anchoredPosition = offset; rt.sizeDelta = new Vector2(88,58);
     }
 
+    void MakeHoldButton(Transform parent, string label, Vector2 anchor, Vector2 offset, string inputName)
+    {
+        var b = MakeButton(parent, label, anchor, Resources.GetBuiltinResource<Font>("Arial.ttf"), () => { });
+        var rt = b.GetComponent<RectTransform>();
+        rt.anchoredPosition = offset;
+        rt.sizeDelta = new Vector2(88, 58);
+        var hold = b.gameObject.AddComponent<MobileHoldButton>();
+        hold.inputName = inputName;
+        hold.owner = this;
+    }
+
+    public void SetMobileInput(string inputName, bool pressed)
+    {
+        if (inputName == "forward") mobileForward = pressed;
+        else if (inputName == "back") mobileBack = pressed;
+        else if (inputName == "left") mobileLeft = pressed;
+        else if (inputName == "right") mobileRight = pressed;
+    }
+
     void SetPlaying(bool value)
     {
         started = value;
@@ -204,9 +227,37 @@ public class GameBootstrap : MonoBehaviour
     {
         if (!started) return;
         fireCooldown -= Time.deltaTime;
+        float h = Input.GetAxisRaw("Horizontal");
+        float v = Input.GetAxisRaw("Vertical");
         if (Application.isMobilePlatform)
         {
             if (Input.GetKeyDown(KeyCode.Escape)) SetPlaying(false);
+            if (mobileLeft) h -= 1f;
+            if (mobileRight) h += 1f;
+            if (mobileForward) v += 1f;
+            if (mobileBack) v -= 1f;
+            for (int i = 0; i < Input.touchCount; i++)
+            {
+                Touch t = Input.GetTouch(i);
+                if (t.phase == TouchPhase.Began && t.position.x > Screen.width * .42f &&
+                    (EventSystem.current == null || !EventSystem.current.IsPointerOverGameObject(t.fingerId)))
+                {
+                    lookFingerId = t.fingerId;
+                    lastLookPosition = t.position;
+                }
+                if (t.fingerId == lookFingerId)
+                {
+                    if (t.phase == TouchPhase.Moved)
+                    {
+                        Vector2 delta = t.position - lastLookPosition;
+                        yaw += delta.x * .16f;
+                        pitch -= delta.y * .13f;
+                        pitch = Mathf.Clamp(pitch, -75, 75);
+                        lastLookPosition = t.position;
+                    }
+                    if (t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled) lookFingerId = -1;
+                }
+            }
         }
         else
         {
@@ -218,8 +269,6 @@ public class GameBootstrap : MonoBehaviour
         }
         player.rotation = Quaternion.Euler(0, yaw, 0);
         cam.transform.localRotation = Quaternion.Euler(pitch, 0, 0);
-        float h = Input.GetAxisRaw("Horizontal");
-        float v = Input.GetAxisRaw("Vertical");
         Vector3 dir = (player.right * h + player.forward * v).normalized;
         controller.Move((dir * 5.2f + Vector3.down * 2f) * Time.deltaTime);
         if (hudText) hudText.text = "STRIKE ZONE     HP " + playerHealth + "     " + ammo + " / " + reserveAmmo + "     KILLS " + kills;
@@ -282,5 +331,24 @@ public class BotAgent : MonoBehaviour
     {
         health = 100;
         transform.position = home;
+    }
+}
+
+
+public class MobileHoldButton : MonoBehaviour, IPointerDownHandler, IPointerUpHandler, IPointerExitHandler
+{
+    public string inputName;
+    public GameBootstrap owner;
+    public void OnPointerDown(PointerEventData eventData)
+    {
+        if (owner != null) owner.SetMobileInput(inputName, true);
+    }
+    public void OnPointerUp(PointerEventData eventData)
+    {
+        if (owner != null) owner.SetMobileInput(inputName, false);
+    }
+    public void OnPointerExit(PointerEventData eventData)
+    {
+        if (owner != null) owner.SetMobileInput(inputName, false);
     }
 }
