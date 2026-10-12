@@ -1,5 +1,7 @@
 using System.IO;
 using UnityEditor;
+using UnityEditor.Build;
+using UnityEditor.Build.Reporting;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -35,5 +37,18 @@ public static class ProjectSetup
             new EditorBuildSettingsScene(ScenePath, true)
         };
         AssetDatabase.Refresh();
+    }
+}
+
+
+public class BuildSceneGuard : IPreprocessBuildWithReport
+{
+    public int callbackOrder { get { return 0; } }
+
+    public void OnPreprocessBuild(BuildReport report)
+    {
+        ProjectSetup.EnsureProjectScene();
+        if (!File.Exists("Assets/Scenes/Main.unity"))
+            throw new BuildFailedException("STRIKE ZONE main scene could not be created.");
     }
 }
